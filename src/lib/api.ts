@@ -168,15 +168,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ order_id: orderId }),
     }),
-  verifyMercadoPago: (orderId: number) =>
+  verifyMercadoPago: (orderId: number, token: string) =>
     request<{ order_status: string; mp_status: string | null }>(
-      `/checkout/mercadopago/verify/${orderId}`,
+      `/checkout/mercadopago/verify/${orderId}?token=${encodeURIComponent(token)}`,
       { method: 'POST' },
     ),
-  verifyKhipu: (orderId: number) =>
-    request<{ order_status: string; khipu_status: string }>(`/checkout/khipu/verify/${orderId}`, {
-      method: 'POST',
-    }),
+  verifyKhipu: (orderId: number, token: string) =>
+    request<{ order_status: string; khipu_status: string }>(
+      `/checkout/khipu/verify/${orderId}?token=${encodeURIComponent(token)}`,
+      { method: 'POST' },
+    ),
   createSubscription: (payload: SubscriptionPayload) =>
     request<SubscriptionCreateResponse>('/subscriptions', {
       method: 'POST',

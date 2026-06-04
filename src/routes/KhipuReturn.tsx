@@ -10,28 +10,32 @@ export default function KhipuReturn() {
   const [params] = useSearchParams();
   const orderIdRaw = params.get('order_id');
   const orderId = orderIdRaw ? Number(orderIdRaw) : null;
+  const token = params.get('token');
   const navigate = useNavigate();
   const [message, setMessage] = useState('Verificando tu pago con Khipu…');
   const [stillPending, setStillPending] = useState(false);
 
   useEffect(() => {
-    if (!orderId) return;
+    if (!orderId || !token) return;
 
     let cancelled = false;
     const start = Date.now();
+    // /thanks exige el token de acceso de la orden — siempre propagarlo.
+    const thanksUrl = (status: string) =>
+      `/thanks/${orderId}?status=${status}&token=${encodeURIComponent(token)}`;
 
     const poll = async () => {
       if (cancelled) return;
       try {
-        const res = await api.verifyKhipu(orderId);
+        const res = await api.verifyKhipu(orderId, token);
         if (cancelled) return;
 
         if (res.order_status === 'paid') {
-          navigate(`/thanks/${orderId}?status=paid`, { replace: true });
+          navigate(thanksUrl('paid'), { replace: true });
           return;
         }
         if (res.order_status === 'failed' || res.order_status === 'canceled') {
-          navigate(`/thanks/${orderId}?status=${res.order_status}`, { replace: true });
+          navigate(thanksUrl(res.order_status), { replace: true });
           return;
         }
 
@@ -57,12 +61,12 @@ export default function KhipuReturn() {
     return () => {
       cancelled = true;
     };
-  }, [orderId, navigate]);
+  }, [orderId, token, navigate]);
 
-  if (!orderId) {
+  if (!orderId || !token) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
-        <p className="text-tengu-coral">Falta order_id</p>
+        <p className="text-tengu-coral">Falta order_id o token</p>
         <Link to="/" className="mt-4 inline-block text-tengu-ink hover:underline">
           ← Volver al inicio
         </Link>
@@ -79,7 +83,7 @@ export default function KhipuReturn() {
       {stillPending && (
         <div className="mt-6 space-y-3">
           <Link
-            to={`/thanks/${orderId}`}
+            to={`/thanks/${orderId}?token=${encodeURIComponent(token ?? '')}`}
             className="inline-block rounded-md bg-tengu-mustard px-6 py-3 text-sm font-semibold uppercase tracking-wider text-tengu-dark"
           >
             Ver pedido #{orderId}

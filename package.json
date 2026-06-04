@@ -11,6 +11,7 @@
     "prerender": "node scripts/prerender.mjs",
     "optimize:heroes": "node scripts/optimize-heroes.mjs",
     "preview": "vite preview",
+    "test:e2e": "playwright test",
     "lint": "tsc --noEmit && eslint \"src/**/*.{ts,tsx}\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\" \"*.{js,cjs,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\" \"*.{js,cjs,json,md}\""
@@ -26,6 +27,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@sparticuz/chromium": "^148.0.0",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",

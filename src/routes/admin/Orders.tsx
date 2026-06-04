@@ -33,11 +33,25 @@ export default function AdminOrders() {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    adminApi
-      .listOrders(filter === 'all' ? undefined : filter)
-      .then(setOrders)
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const load = (showSpinner: boolean) => {
+      if (showSpinner) setLoading(true);
+      adminApi
+        .listOrders(filter === 'all' ? undefined : filter)
+        .then((data) => {
+          if (!cancelled) setOrders(data);
+        })
+        .finally(() => {
+          if (showSpinner && !cancelled) setLoading(false);
+        });
+    };
+    load(true);
+    // Los pagos confirman vía webhook en background: refrescar sin spinner
+    const interval = setInterval(() => load(false), 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [filter]);
 
   const updateOrder = async (
@@ -162,6 +176,18 @@ function OrderDetail({
 }) {
   const [tracking, setTracking] = useState(order.tracking_code ?? '');
   const [notes, setNotes] = useState(order.admin_notes ?? '');
+  const [notesStatus, setNotesStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  const saveNotes = async () => {
+    setNotesStatus('saving');
+    try {
+      await onUpdate({ admin_notes: notes });
+      setNotesStatus('saved');
+    } catch (err) {
+      setNotesStatus('error');
+      alert(`No se pudo guardar la nota: ${err instanceof Error ? err.message : err}`);
+    }
+  };
 
   return (
     <div className="grid gap-6 md:grid-cols-2">
@@ -243,15 +269,24 @@ function OrderDetail({
           <label className="block text-xs uppercase tracking-wider text-tengu-dark/60">Notas internas</label>
           <textarea
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            onBlur={() => {
-              if (notes !== (order.admin_notes ?? '')) {
-                onUpdate({ admin_notes: notes }).catch((err) => alert(`Error: ${err}`));
-              }
+            onChange={(e) => {
+              setNotes(e.target.value);
+              setNotesStatus('idle');
             }}
             rows={2}
             className="mt-1 w-full rounded-md border border-tengu-dark/15 px-3 py-1.5 text-sm"
           />
+          <div className="mt-1 flex items-center gap-3">
+            <button
+              onClick={saveNotes}
+              disabled={notesStatus === 'saving' || notes === (order.admin_notes ?? '')}
+              className="rounded-md bg-tengu-ink px-3 py-1.5 text-xs uppercase tracking-wider text-white disabled:opacity-40"
+            >
+              {notesStatus === 'saving' ? 'Guardando…' : 'Guardar nota'}
+            </button>
+            {notesStatus === 'saved' && <span className="text-xs text-green-700">Guardada ✓</span>}
+            {notesStatus === 'error' && <span className="text-xs text-tengu-coral">Error al guardar</span>}
+          </div>
         </div>
       </div>
     </div>

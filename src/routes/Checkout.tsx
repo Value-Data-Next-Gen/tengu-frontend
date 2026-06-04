@@ -10,6 +10,10 @@ import { selectCartSubtotal, useCart } from '../store/cart';
 import type { CouponPreview, ShippingMethod, ShippingMode, ShippingQuote, SiteSettings } from '../types';
 
 const PREFILL_KEY = 'tengu-checkout-prefill-v1';
+// Orden pending ya creada en este flujo de checkout. Si el cliente vuelve
+// atrás desde la pasarela y reintenta con el mismo carrito/datos/método,
+// reusamos esa orden en vez de crear otra (cada createOrder reserva stock).
+export const PENDING_ORDER_KEY = 'tengu-pending-order-v1';
 
 type PrefillForm = {
   customer_email: string;
@@ -366,7 +370,7 @@ export default function Checkout() {
         /* localStorage lleno o desactivado: ignorar */
       }
 
-      const order = await api.createOrder({
+      const orderPayload = {
         customer_email: form.customer_email.trim(),
         customer_name: form.customer_name.trim(),
         customer_phone: form.customer_phone.trim(),
@@ -388,9 +392,47 @@ export default function Checkout() {
           quantity: i.quantity,
           grind: i.grind,
         })),
-      });
+      };
 
-      if (method === 'webpay') {
+      // Reusar la orden pending previa si el pedido es idéntico (mismo
+      // carrito, datos y método): evita órdenes duplicadas reservando stock
+      // cuando el cliente vuelve atrás desde la pasarela y reintenta.
+      const orderHash = JSON.stringify([
+        orderPayload.items, orderPayload.coupon_code, orderPayload.payment_method,
+        orderPayload.shipping_method, orderPayload.shipping_mode, orderPayload.shipping_address,
+        orderPayload.shipping_comuna, orderPayload.shipping_region, orderPayload.customer_email,
+      ]);
+      let order: Awaited<ReturnType<typeof api.createOrder>> | null = null;
+      try {
+        const raw = sessionStorage.getItem(PENDING_ORDER_KEY);
+        const stored = raw ? (JSON.parse(raw) as { id: number; token: string; hash: string }) : null;
+        if (stored && stored.hash === orderHash && stored.token) {
+          const existing = await api.getOrder(stored.id, stored.token);
+          if (existing.status === 'pending') {
+            order = { ...existing, access_token: stored.token };
+          }
+        }
+      } catch {
+        /* orden previa no recuperable: crear una nueva */
+      }
+      if (!order) {
+        order = await api.createOrder(orderPayload);
+        try {
+          sessionStorage.setItem(
+            PENDING_ORDER_KEY,
+            JSON.stringify({ id: order.id, token: order.access_token, hash: orderHash }),
+          );
+        } catch {
+          /* sessionStorage desactivado: seguir sin reuso */
+        }
+      }
+
+      if (order.total_clp === 0) {
+        // Cupón 100%: el backend ya la marcó pagada — no hay nada que cobrar
+        // y las pasarelas rechazan montos 0.
+        inFlightRef.current = false;
+        navigate(`/thanks/${order.id}?status=paid&token=${order.access_token}`);
+      } else if (method === 'webpay') {
         const init = await api.initWebpay(order.id);
         setWebpay({ url: init.url, token: init.token });
       } else if (method === 'khipu') {

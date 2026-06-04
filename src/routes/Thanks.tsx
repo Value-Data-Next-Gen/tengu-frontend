@@ -6,6 +6,7 @@ import { api, formatCLP, formatSize } from '../lib/api';
 import { grindLabel } from '../lib/grind';
 import { useCart } from '../store/cart';
 import type { Order } from '../types';
+import { PENDING_ORDER_KEY } from './Checkout';
 
 const STATUS_COPY = {
   paid: {
@@ -56,25 +57,36 @@ export default function Thanks() {
       return;
     }
 
+    let cancelled = false;
+    const start = Date.now();
+    const POLL_INTERVAL_MS = 3000;
+    const POLL_TIMEOUT_MS = 45_000;
+
     const fetchOrder = async () => {
       try {
         let o = await api.getOrder(Number(orderId), token);
         // Si el cliente vuelve de MP/Khipu antes que llegue el webhook al
-        // backend, la orden queda pending. Verificamos contra el gateway una
-        // vez para forzar la actualización. Si sigue pending tras el verify,
-        // mostramos copy "estamos procesando" sin frustrar al cliente.
+        // backend, la orden queda pending. Verificamos contra el gateway para
+        // forzar la actualización y seguimos sondeando hasta 45s (el webhook
+        // puede tardar unos segundos). Si sigue pending, copy "procesando".
         if (o.status === 'pending') {
           if (o.payment_method === 'mercadopago') {
-            await api.verifyMercadoPago(Number(orderId)).catch(() => undefined);
+            await api.verifyMercadoPago(Number(orderId), token).catch(() => undefined);
             o = await api.getOrder(Number(orderId), token);
           } else if (o.payment_method === 'khipu') {
-            await api.verifyKhipu(Number(orderId)).catch(() => undefined);
+            await api.verifyKhipu(Number(orderId), token).catch(() => undefined);
             o = await api.getOrder(Number(orderId), token);
           }
         }
+        if (cancelled) return;
         setOrder(o);
         if (o.status === 'paid') {
           clearCart();
+          try {
+            sessionStorage.removeItem(PENDING_ORDER_KEY);
+          } catch {
+            /* ignore */
+          }
           ecommerceEvents.purchase(
             o.id,
             o.items.map((i) => ({
@@ -86,14 +98,23 @@ export default function Thanks() {
             })),
             o.total_clp,
           );
+        } else if (
+          o.status === 'pending' &&
+          (o.payment_method === 'mercadopago' || o.payment_method === 'khipu') &&
+          Date.now() - start < POLL_TIMEOUT_MS
+        ) {
+          setTimeout(fetchOrder, POLL_INTERVAL_MS);
         }
       } catch (err) {
-        setError(String(err));
+        if (!cancelled) setError(String(err));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     fetchOrder();
+    return () => {
+      cancelled = true;
+    };
   }, [orderId, token, clearCart]);
 
   if (loading) {
